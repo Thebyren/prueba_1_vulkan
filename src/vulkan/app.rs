@@ -14,6 +14,7 @@ use super::buffers::{create_command_buffers, create_command_pool, create_framebu
 use super::logical_device::{create_logical_device, pick_physical_device};
 use anyhow::{Ok, Result};
 use anyhow::anyhow;
+
 #[derive(Clone, Debug)]
 pub struct  App {
     pub entry: Entry,
@@ -43,52 +44,16 @@ impl App {
         create_vertex_buffer(&instance, &device, &mut data)?;
         create_command_buffers(&device, &mut data)?;
         create_async_objects(&device, &mut data)?;
-        
         Ok(Self {
             entry,
             instance,
             data,
             device,
-            frame:0,
+            frame: 0,
             resized: false,
         })
     }
-    unsafe fn recreate_swapchain(
-        &mut self, 
-        window:&Window, 
-    )->Result<()>{
-        self.device.device_wait_idle()?;
-        create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
-        create_swapchain_image_views(&self.device,  &mut self.data)?;
-        create_render_pass(&self.instance, &self.device,  &mut self.data)?;
-        create_pipeline(&self.device,  &mut self.data)?;
-        create_framebuffers(&self.device,  &mut self.data)?;
-        create_command_buffers(&self.device,&mut self.data)?;
-        self.data
-            .images_in_flight
-            .resize(self.data.swapchain_images.len(), vk::Fence::null());
-        Ok(())
-    }
-    
-    /// Limpia los recursos antiguos del swapchain
-    unsafe fn cleanup_swapchain(&mut self) {
-        self.device.free_command_buffers(
-            self.data.command_pool,
-            &self.data.command_buffers);
-        self.data.framebuffers
-            .iter()
-            .for_each(|f| {
-            self.device.destroy_framebuffer(*f, None);
-        });
-        self.device.destroy_pipeline(self.data.pipeline, None);
-        self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);
-        self.device.destroy_render_pass(self.data.render_pass, None);
-        self.data.swapchain_images_view.iter().for_each(|i| {
-            self.device.destroy_image_view(*i, None);
-        });
-        self.device.destroy_swapchain_khr(self.data.swapchain, None);
-    }
-    
+
     /// Renders a frame for our Vulkan app.
     pub unsafe fn render(&mut self, window: &Window) -> Result<()> {
         let in_flight_fence = self.data.in_flight_fences[self.frame];
@@ -98,7 +63,7 @@ impl App {
         let result = self.device.acquire_next_image_khr(
             self.data.swapchain,
             u64::MAX,
-            self.data.image_available_semaphore[self.frame],
+            self.data.image_available_semaphores[self.frame],
             vk::Fence::null(),
         );
 
@@ -115,10 +80,10 @@ impl App {
 
         self.data.images_in_flight[image_index] = in_flight_fence;
 
-        let wait_semaphores = &[self.data.image_available_semaphore[self.frame]];
+        let wait_semaphores = &[self.data.image_available_semaphores[self.frame]];
         let wait_stages = &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let command_buffers = &[self.data.command_buffers[image_index]];
-        let signal_semaphores = &[self.data.render_finished_semaphore[self.frame]];
+        let signal_semaphores = &[self.data.render_finished_semaphores[self.frame]];
         let submit_info = vk::SubmitInfo::builder()
             .wait_semaphores(wait_semaphores)
             .wait_dst_stage_mask(wait_stages)
@@ -151,25 +116,31 @@ impl App {
         Ok(())
     }
 
+    /// Recreates the swapchain for our Vulkan app.
+    #[rustfmt::skip]
+    unsafe fn recreate_swapchain(&mut self, window: &Window) -> Result<()> {
+        self.device.device_wait_idle()?;
+        self.destroy_swapchain();
+        create_swapchain(window, &self.instance, &self.device, &mut self.data)?;
+        create_swapchain_image_views(&self.device, &mut self.data)?;
+        create_render_pass(&self.instance, &self.device, &mut self.data)?;
+        create_pipeline(&self.device, &mut self.data)?;
+        create_framebuffers(&self.device, &mut self.data)?;
+        create_command_buffers(&self.device, &mut self.data)?;
+        self.data.images_in_flight.resize(self.data.swapchain_images.len(), vk::Fence::null());
+        Ok(())
+    }
+
     /// Destroys our Vulkan app.
     #[rustfmt::skip]
     pub unsafe fn destroy(&mut self) {
-
         self.device.device_wait_idle().unwrap();
-        
-        self.cleanup_swapchain();
-        
-        self.data.in_flight_fences
-            .iter()
-            .for_each(|t| self.device.destroy_fence(*t, None));
-        self.data.render_finished_semaphore
-            .iter()
-            .for_each(
-                |r| self.device.destroy_semaphore(*r, None));
-                
-        self.data.image_available_semaphore
-            .iter()
-            .for_each(|t| self.device.destroy_semaphore(*t, None));
+
+        self.destroy_swapchain();
+
+        self.data.in_flight_fences.iter().for_each(|f| self.device.destroy_fence(*f, None));
+        self.data.render_finished_semaphores.iter().for_each(|s| self.device.destroy_semaphore(*s, None));
+        self.data.image_available_semaphores.iter().for_each(|s| self.device.destroy_semaphore(*s, None));
         self.device.free_memory(self.data.vertex_buffer_memory, None);
         self.device.destroy_buffer(self.data.vertex_buffer, None);
         self.device.destroy_command_pool(self.data.command_pool, None);
@@ -179,8 +150,20 @@ impl App {
         if VALIDATION_ENABLED {
             self.instance.destroy_debug_utils_messenger_ext(self.data.messenger, None);
         }
+
         self.instance.destroy_instance(None);
-       
+    }
+
+    /// Destroys the parts of our Vulkan app related to the swapchain.
+    #[rustfmt::skip]
+    pub unsafe fn destroy_swapchain(&mut self) {
+        self.device.free_command_buffers(self.data.command_pool, &self.data.command_buffers);
+        self.data.framebuffers.iter().for_each(|f| self.device.destroy_framebuffer(*f, None));
+        self.device.destroy_pipeline(self.data.pipeline, None);
+        self.device.destroy_pipeline_layout(self.data.pipeline_layout, None);
+        self.device.destroy_render_pass(self.data.render_pass, None);
+        self.data.swapchain_images_views.iter().for_each(|v| self.device.destroy_image_view(*v, None));
+        self.device.destroy_swapchain_khr(self.data.swapchain, None);
     }
 }
 /// The Vulkan handles and associated properties used by our Vulkan app.
@@ -199,7 +182,7 @@ pub struct AppData {
     pub swapchain_extent: vk::Extent2D,
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_images: Vec<vk::Image>,
-    pub swapchain_images_view: Vec<vk::ImageView>,
+    pub swapchain_images_views: Vec<vk::ImageView>,
     //render and pipeline
     pub render_pass : vk::RenderPass,
     pub pipeline_layout: vk::PipelineLayout,
@@ -207,8 +190,8 @@ pub struct AppData {
     pub framebuffers:Vec<vk::Framebuffer>,
     pub command_pool:vk::CommandPool,
     pub command_buffers:Vec<vk::CommandBuffer>,
-    pub image_available_semaphore: Vec<vk::Semaphore>,
-    pub render_finished_semaphore: Vec<vk::Semaphore>,
+    pub image_available_semaphores: Vec<vk::Semaphore>,
+    pub render_finished_semaphores: Vec<vk::Semaphore>,
     pub in_flight_fences: Vec<vk::Fence>,
     pub images_in_flight: Vec<vk::Fence>,
     
@@ -223,20 +206,20 @@ unsafe fn create_async_objects (
     data:&mut AppData
 )->Result<()>{
     let semaphore_info = vk::SemaphoreCreateInfo::builder();
-    for _ in 0..MAX_FRAMES_IN_FLIGHT{
-        data.image_available_semaphore.push(
-            device.create_semaphore(&semaphore_info, None)?
-        );
-        data.render_finished_semaphore.push(  
-            device.create_semaphore(&semaphore_info, None)?
-        );
-    }
     let fences_info = vk::FenceCreateInfo::builder()
         .flags(vk::FenceCreateFlags::SIGNALED)
     ;
     for _ in 0..MAX_FRAMES_IN_FLIGHT{
-        data.image_available_semaphore.push(device.create_semaphore(&semaphore_info, None)?);
-        data.render_finished_semaphore.push(device.create_semaphore(&semaphore_info, None)?);
+        data.image_available_semaphores.push(
+            device.create_semaphore(&semaphore_info, None)?
+        );
+        data.render_finished_semaphores.push(  
+            device.create_semaphore(&semaphore_info, None)?
+        );
+    }
+    for _ in 0..MAX_FRAMES_IN_FLIGHT{
+        data.image_available_semaphores.push(device.create_semaphore(&semaphore_info, None)?);
+        data.render_finished_semaphores.push(device.create_semaphore(&semaphore_info, None)?);
         data.in_flight_fences
         .push(device.create_fence(&fences_info, None)?);
     }

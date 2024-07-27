@@ -1,12 +1,9 @@
-use super::queue::QueueFamilyIndices;
-use super::vertex_data::Vertex;
+use crate::vulkan::queue::QueueFamilyIndices;
+use crate::vulkan::vertex_data::Vertex;
 use crate::vulkan::app::AppData;
 use std::ptr::copy_nonoverlapping as memcpy;
 use anyhow::{Ok, Result,anyhow};
-use vulkanalia::{
-    vk::{self, DeviceV1_0, HasBuilder, InstanceV1_0},
-    Device, Instance,
-};
+use vulkanalia::prelude::v1_0::*;
 use crate::vulkan::vertex_data::VERTICES;
 use std::mem::size_of;
 
@@ -14,7 +11,7 @@ pub unsafe fn create_framebuffers(
     device: &Device, data: &mut AppData
 ) -> Result<()> {
     data.framebuffers = data
-        .swapchain_images_view
+        .swapchain_images_views
         .iter()
         .map(|i| {
             let attachments = &[*i];

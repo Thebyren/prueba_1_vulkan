@@ -64,7 +64,7 @@ pub unsafe fn create_swapchain_image_views(
     device: &Device,
     data: &mut AppData,
 ) -> Result<()> {
-    data.swapchain_images_view = data
+    data.swapchain_images_views = data
         .swapchain_images
         .iter()
         .map(|i| {

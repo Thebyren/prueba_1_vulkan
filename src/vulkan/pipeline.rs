@@ -5,8 +5,11 @@ use vulkanalia::bytecode::Bytecode;
 use super::app::AppData;
 use crate::vulkan::vertex_data::Vertex;
 pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()> {
+    // Stages
+
     let vert = include_bytes!("../shaders/vert.spv");
     let frag = include_bytes!("../shaders/frag.spv");
+
     let vert_shader_module = create_module_shader(device, &vert[..])?;
     let frag_shader_module = create_module_shader(device, &frag[..])?;
 
@@ -14,29 +17,36 @@ pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()>
         .stage(vk::ShaderStageFlags::VERTEX)
         .module(vert_shader_module)
         .name(b"main\0");
+
     let frag_stage = vk::PipelineShaderStageCreateInfo::builder()
         .stage(vk::ShaderStageFlags::FRAGMENT)
         .module(frag_shader_module)
         .name(b"main\0");
+
+    // Vertex Input State
+
     let binding_descriptions = &[Vertex::binding_description()];
     let attribute_descriptions = Vertex::attribute_descriptions();
     let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::builder()
         .vertex_binding_descriptions(binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
-    
+
+    // Input Assembly State
+
     let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::builder()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
         .primitive_restart_enable(false);
 
-    // Creamos el espacio donde renderizaremos la geometría
+    // Viewport State
+
     let viewport = vk::Viewport::builder()
         .x(0.0)
         .y(0.0)
-        .height(data.swapchain_extent.height as f32)
         .width(data.swapchain_extent.width as f32)
+        .height(data.swapchain_extent.height as f32)
         .min_depth(0.0)
         .max_depth(1.0);
-    // Creamos el espacio de recorte de la renderización
+
     let scissor = vk::Rect2D::builder()
         .offset(vk::Offset2D { x: 0, y: 0 })
         .extent(data.swapchain_extent);
@@ -44,35 +54,32 @@ pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()>
     let viewports = &[viewport];
     let scissors = &[scissor];
     let viewport_state = vk::PipelineViewportStateCreateInfo::builder()
-        .scissors(scissors)
-        .viewports(viewports);
+        .viewports(viewports)
+        .scissors(scissors);
+
+    // Rasterization State
 
     let rasterization_state = vk::PipelineRasterizationStateCreateInfo::builder()
         .depth_clamp_enable(false)
         .rasterizer_discard_enable(false)
-        .polygon_mode(vk::PolygonMode::FILL)    
-        //.polygon_mode(vk::PolygonMode::LINE)    
-        //.polygon_mode(vk::PolygonMode::POINT)    
+        .polygon_mode(vk::PolygonMode::FILL)
         .line_width(1.0)
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::CLOCKWISE)
         .depth_bias_enable(false);
 
+    // Multisample State
+
     let multisample_state = vk::PipelineMultisampleStateCreateInfo::builder()
         .sample_shading_enable(false)
         .rasterization_samples(vk::SampleCountFlags::_1);
 
+    // Color Blend State
+
     let attachment = vk::PipelineColorBlendAttachmentState::builder()
         .color_write_mask(vk::ColorComponentFlags::all())
-        .blend_enable(false)
-        .src_color_blend_factor(vk::BlendFactor::ONE)
-        .dst_color_blend_factor(vk::BlendFactor::ZERO)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD)
-        
-        ;
+        .blend_enable(false);
+
     let attachments = &[attachment];
     let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
         .logic_op_enable(false)
@@ -80,12 +87,15 @@ pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()>
         .attachments(attachments)
         .blend_constants([0.0, 0.0, 0.0, 0.0]);
 
-    let stages = &[vert_stage, frag_stage];
+    // Layout
 
-    // Creación del PipelineLayout antes de usarlo
     let layout_info = vk::PipelineLayoutCreateInfo::builder();
+
     data.pipeline_layout = device.create_pipeline_layout(&layout_info, None)?;
 
+    // Create
+
+    let stages = &[vert_stage, frag_stage];
     let info = vk::GraphicsPipelineCreateInfo::builder()
         .stages(stages)
         .vertex_input_state(&vertex_input_state)
@@ -98,9 +108,12 @@ pub unsafe fn create_pipeline(device: &Device, data: &mut AppData) -> Result<()>
         .render_pass(data.render_pass)
         .subpass(0);
 
-    data.pipeline = device.create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?.0[0];
+    data.pipeline = device
+        .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)?
+        .0[0];
 
-    // Destrucción de módulos de shaders
+    // Cleanup
+
     device.destroy_shader_module(vert_shader_module, None);
     device.destroy_shader_module(frag_shader_module, None);
 
